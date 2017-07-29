@@ -1,0 +1,160 @@
+---
+title: "Machine learning project"
+author: "Micky Chi"
+date: "28 July, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This is the report for the final project of Coursera's course Practical Machine Learning. It was written in R markdown file and published in html format.
+The goal of the project is to predict the manner in which people do exercises using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. 
+
+## Background Information
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data and Exploratory Analysis
+
+### Data Source
+
+Data can be downloaded using the following links
+
+[Training Data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+[Testing Data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+### Environment Preparation
+
+Load all the R packages necessary for the entire analysis.
+
+```{r environment, results='hide'}
+library(caret)
+library(rattle)
+library(rpart)
+library(randomForest)
+library(corrplot)
+library(rpart.plot)
+library(gbm)
+set.seed(1994)
+```
+
+### Download Data
+
+Next we will download the data from the web. The training dataset would be partitioned into a training set, which is 3/4 of the original data set, with the remaining belongs to a testing set which would be used for validations. The testing dataset won't be used for any model refinements.
+
+```{r download}
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+# Partition the trainint dataset with the outcome variable
+inTrain <- createDataPartition(training$classe, p = 3/4, list = FALSE)
+train <- training[inTrain,]
+test <- training[-inTrain,]
+```
+
+### Data cleaning
+
+Let's take a look at the data.
+
+```{r}
+dim(train)
+dim(test)
+```
+
+There are 160 variables in the dataset which is apparently too many for a valid analysis. So here we make a more detailed analysis on the variables. First we remove variables with more than 80% NAs.
+
+```{r remove NAs}
+NAs <- sapply(train, function(x) mean(is.na(x))) > 0.9
+train <- train[, NAs==FALSE]
+test <- test[, NAs==FALSE]
+dim(train)
+```
+
+Next we remove those variables with almost zero variance.
+
+```{r remove NZVs}
+NZVs <- nearZeroVar(train)
+train <- train[, -NZVs]
+test <- test[, -NZVs]
+dim(train)
+```
+
+We also need to remove those variables that serves only identification purposes, such as variables about identification number, user names, and timing.
+
+```{r remove id}
+train <- train[, -(1:5)]
+test <- test[, -(1:5)]
+dim(train)
+```
+
+The requirement of the project is to use data from accelerometers on the belt, forearm, arm, and dumbell to make predictions, so now we filter those related variables.
+
+```{r filter}
+filter <- grepl("belt|arm|forearm|dumbell", names(train))
+class1 <- train$classe
+class2 <- test$classe
+train <- cbind(train[,filter],class1)
+test <- as.data.frame(cbind(test[, filter],class2))
+train$class1 <- as.factor(train$class1)
+test$class2 <- as.factor(test$class2)
+dim(train)
+```
+
+
+### Correlation Analysis
+
+```{r corr}
+cor <- cor(train[, -40])
+corrplot(cor, method = "color", tl.col = rgb(0,0,0), tl.cex = 0.8)
+```
+
+Dark colors mean high correlation. From the plot, we can see that there are relatively few squares with dark color, so the correlation between predictors are comparatively weak.
+
+## Prediction Models
+
+### Decision Trees
+
+```{r decision trees}
+set.seed(1994)
+fit1 <- rpart(class1~., method = "class", data = train)
+fancyRpartPlot(fit1)
+pre1 <- predict(fit1, newdata = test, type = "class")
+con1 <- confusionMatrix(pre1, test$class2)
+con1
+plot(con1$table, col = con1$byClass, main = paste("Decision Tree - Accuracy:", round(con1$overall["Accuracy"], 4)))
+```
+
+### Random Forests
+
+```{r random forests}
+train$class1 <- as.factor(train$class1)
+test$class2 <- as.factor(test$class2)
+fit2 <- randomForest(class1~., data = train)
+pre2 <- predict(fit2, newdata = test, type = "class")
+con2 <- confusionMatrix(pre2, test$class2)
+con2
+plot(con2$table, col = con2$byClass, main = paste("Random Forest - Accuracy:", round(con2$overall["Accuracy"], 4)))
+```
+
+### Generalized Boosted Model
+
+```{r gbm}
+set.seed(1994)
+fit3 <- train(class1~., data = train, method = "gbm", verbose = FALSE)
+pre3 <- predict(fit3, newdata = test)
+con3 <- confusionMatrix(pre3, test$class2)
+con3
+plot(con3$table, col = con3$byClass, main = paste("Generalized Boosted - Accuracy:", round(con3$overall["Accuracy"], 4)))
+```
+
+## Model Validation
+
+Comparing the accuracy of the three models, we select the method of random forest.
+
+```{r predict}
+predict(fit2, newdata = testing)
+```
